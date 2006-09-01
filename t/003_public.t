@@ -4,7 +4,7 @@ use strict;
 use Test::More tests => 23;
 
 use Games::Mastermind;
-use Games::Mastermind::Solver;
+use Games::Mastermind::Solver::BruteForce;
 
 my $pegs = [ qw(B C G R Y W) ];
 my $holes = 4;
@@ -12,7 +12,7 @@ my $holes = 4;
 {
     package Games::Mastermind::Tester;
 
-    use base qw(Games::Mastermind::Solver);
+    use base qw(Games::Mastermind::Solver::BruteForce);
 
     sub _guess {
         return $_[0]->_possibility( 0 );

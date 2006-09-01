@@ -4,7 +4,7 @@ use strict;
 use Test::More tests => 8;
 
 use Games::Mastermind;
-use Games::Mastermind::Solver;
+use Games::Mastermind::Solver::BruteForce;
 
 my $pegs = [ qw(B C G R Y W) ];
 my $holes = 4;
@@ -13,13 +13,13 @@ my $game = Games::Mastermind->new
     ( pegs  => $pegs,
       holes => $holes,
       );
-my $player = Games::Mastermind::Solver->new( $game );
+my $player = Games::Mastermind::Solver::BruteForce->new( $game );
 
-is_deeply( [ Games::Mastermind::Solver::_from_number( 0, $pegs, $holes ) ],
+is_deeply( [ Games::Mastermind::Solver::BruteForce::_from_number( 0, $pegs, $holes ) ],
            [ qw(B B B B) ] );
-is_deeply( [ Games::Mastermind::Solver::_from_number( 1295, $pegs, $holes ) ],
+is_deeply( [ Games::Mastermind::Solver::BruteForce::_from_number( 1295, $pegs, $holes ) ],
            [ qw(W W W W) ] );
-is_deeply( [ Games::Mastermind::Solver::_from_number( 1244, $pegs, $holes ) ],
+is_deeply( [ Games::Mastermind::Solver::BruteForce::_from_number( 1244, $pegs, $holes ) ],
            [ qw(G R Y W) ] );
 
 is( $player->_peg_number, 6 );

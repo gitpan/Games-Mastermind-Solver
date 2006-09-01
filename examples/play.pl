@@ -5,9 +5,10 @@ use warnings;
 use lib 'lib';
 
 use Games::Mastermind;
-use Games::Mastermind::Solver;
+use Games::Mastermind::Solver::BruteForce;
 
-my $player = Games::Mastermind::Solver->new( Games::Mastermind->new );
+my $player = Games::Mastermind::Solver::BruteForce
+                 ->new( Games::Mastermind->new );
 my $try;
 
 print join( ' ', @{$player->game->code} ), "\n\n";

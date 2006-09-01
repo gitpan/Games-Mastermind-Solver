@@ -7,7 +7,7 @@ my $builder = Module::Build->new
   ( module_name        => 'Games::Mastermind::Solver',
     license            => 'perl',
     dist_author        => 'Mattia Barbon <mbarbon@cpan.org>',
-    requires           => { 'Class::Accessor::Fast'   => '0.01',
+    requires           => { 'Class::Accessor'         => '0.27',
                             'Games::Mastermind'       => '0.01',
                             'Test::More'              => '0.48',
                             },
