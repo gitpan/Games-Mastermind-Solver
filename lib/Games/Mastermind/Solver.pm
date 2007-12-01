@@ -1,127 +1,391 @@
+#!perl
 package Games::Mastermind::Solver;
+use Moose;
 
-use strict;
-use warnings;
-use base qw(Class::Accessor::Fast);
+has holes => (
+    is      => 'ro',
+    isa     => 'Int',
+    default => 4,
+);
 
-our $VERSION = '0.02';
+has pegs => (
+    is      => 'ro',
+    isa     => 'ArrayRef',
+    default => sub { [qw/K B G R Y W/] },
+);
 
-__PACKAGE__->mk_ro_accessors( qw(game won) );
+has history => (
+    is      => 'rw',
+    isa     => 'ArrayRef',
+    default => sub { [] },
+);
 
-sub new {
-    my( $class, $game ) = @_;
-    my $self = $class->SUPER::new( { game => $game } );
-    $self->reset;
-    return $self;
+has get_result => (
+    is      => 'rw',
+    isa     => 'CodeRef',
+    default => sub { sub {
+        my $self = shift;
+        my $guess = shift;
+        print "Guessing $guess. How many black and white pegs? ";
+        local $_ = <>;
+
+        # if < 10 holes, then no separator necessary
+        if ($self->holes < 10) {
+            return /(\d).*?(\d)/;
+        }
+
+        return /(\d+)\D+(\d+)/;
+    }},
+);
+
+# repeatedly prompt the user until we get realistic input
+sub play {
+    my $self  = shift;
+    my $guess = shift;
+    my ($black, $white);
+
+    do {
+        do {
+            ($black, $white) = $self->get_result->($self, $guess);
+        }
+        until defined $black && defined $white;
+    }
+    until $black + $white <= $self->holes;
+
+    return ($black, $white);
 }
 
-sub move {
-    my( $self, $guess ) = @_;
-    return ( 1, undef, undef ) if $self->won;
+# go from zero to solution
+sub solve {
+    my $self = shift;
 
-    $guess ||= $self->guess;
-    my $result = $self->game->play( @$guess );
-    if( $result->[0] == $self->game->holes ) {
-        $self->{won} = 1;
-    } else {
-        $self->check( $guess, $result );
+    while (1) {
+        my $guess = $self->make_guess;
+
+        # no solution found
+        return undef if !defined($guess);
+
+        # solution found
+        return $$guess if ref($guess);
+
+        my ($black, $white) = $self->play($guess);
+
+        return $guess
+            if $black == $self->holes;
+
+        push @{ $self->history }, [$guess, $black, $white];
+
+        $self->result_of($guess, $black, $white);
+    }
+}
+
+# don't let the user instantiate this directly
+around new => sub {
+    my $orig  = shift;
+    my $class = shift;
+    $class = blessed($class) || $class;
+
+    if ($class eq 'Games::Mastermind::Solver') {
+        confess "You must choose a subclass of Games::Mastermind::Solver. I recommend Games::Mastermind::Solver::Sequential.";
     }
 
-    return ( $self->won, $guess, $result );
+    $orig->($class, @_);
+};
+
+# callback to let the solver module know how he did
+sub result_of { }
+
+# the meat of the solver modules
+sub make_guess {
+    confess "Your subclass must override make_guess.";
 }
 
-sub reset {
-    my( $self ) = @_;
-    $self->game->reset;
-    $self->{won} = 0;
+# auxiliary methods
+
+sub last_guess {
+    my $self = shift;
+
+    my $last = $self->history->[-1];
+
+    return undef if !defined($last);
+    return $last->[0];
 }
 
-1;
+sub random_peg {
+    my $self = shift;
 
-__END__
+    return $self->pegs->[rand @{$self->pegs}];
+}
+
+sub all_codes {
+    my $self = shift;
+
+    my $possibilities = {};
+
+    my @pegs  = @{ $self->pegs };
+    my $holes = $self->holes;
+
+    # generate all holes-length permutations of @pegs recursively
+    my $generate;
+    $generate = sub {
+        my $p = shift;
+        my $len = 1 + shift;
+
+        if ($len == $holes) {
+            $possibilities->{$p . $_} = 1 for @pegs;
+        }
+        else {
+            $generate->($p . $_, $len) for @pegs;
+        }
+    };
+
+    # start this baby off
+    $generate->('', 0);
+
+    return $possibilities;
+}
+
+sub score {
+    my $self  = shift;
+    my @guess = split '', shift;
+    my @code  = split '', shift;
+
+    my $black = 0;
+    my $white = 0;
+
+    no warnings 'uninitialized';
+
+    # code stolen from Games::Mastermind
+
+    # black marks
+    for my $i (0 .. @code - 1) {
+        if ($guess[$i] eq $code[$i]) {
+            ++$black;
+            $guess[$i] = $code[$i] = undef;
+        }
+    }
+
+    # white marks
+    @guess = sort grep { defined } @guess;
+    @code  = sort grep { defined } @code;
+
+    while (@guess && @code) {
+        if ($guess[0] eq $code[0]) {
+            $white++;
+            shift @guess;
+            shift @code;
+        }
+        else {
+            if ($guess[0] lt $code[0]) { shift @guess }
+            else                       { shift @code  }
+        }
+    }
+
+    return ($black, $white);
+}
 
 =head1 NAME
 
-Games::Mastermind::Solver - a Master Mind puzzle solver
+Games::Mastermind::Solver - quickly solve Mastermind
+
+=head1 VERSION
+
+Version 0.01 released 01 Dec 07
+
+=cut
+
+our $VERSION = '0.01';
 
 =head1 SYNOPSIS
 
-    # a trivial Mastermind solver
-
-    use Games::Mastermind;
-    use Games::Mastermind::Solver::BruteForce;
-
-    my $player = Games::Mastermind::Solver::BruteForce
-                     ->new( Games::Mastermind->new );
-    my $try;
-
-    print join( ' ', @{$player->game->code} ), "\n\n";
-
-    until( $player->won || ++$try > 10 ) {
-        my( $win, $guess, $result ) = $player->move;
-
-        print join( ' ', @$guess ),
-              '  ',
-              'B' x $result->[0], 'W' x $result->[1],
-              "\n";
-    }
+    use Games::Mastermind::Solver::Sequential;
+    my $solver = Games::Mastermind::Solver::Sequential->new();
+    printf "The solution is %s!\n", $solver->solve;
 
 =head1 DESCRIPTION
 
-C<Games::Mastermind::Solver> is a base class for Master Mind solvers.
+Mastermind is a code-breaking game played by two players, the "code maker" and
+the "code breaker".
 
-=head1 METHODS
+This module plays the role of code breaker. The only requirement is that you
+provide the answers to how many black pegs and how many white pegs a code
+gives.
 
-=head2 new
+You must instantiate a subclass of this module to actually break codes. There
+are a number of different solver modules, described in L</ALGORITHMS>.
 
-    $player = Games::Mastermind::Solver->new( $game );
+L<Games::Mastermind> is the same game, except it plays the role of code maker.
 
-Constructor. Takes a C<Games::Mastermind> object as argument.
+=head1 ALGORITHMS
 
-=head2 move
+Here are the algorithms, in roughly increasing order of quality.
 
-    ( $won, $guess, $result ) = $player->move;
-    ( $won, $guess, $result ) = $player->move( $guess );
+=head2 L<Games::Mastermind::Solver::Random>
 
-The player chooses a suitable move to continue the game, plays it
-against the game object passed as constructor and updates its knowledge
-of the solution. The C<$won> return value is a boolean, C<$guess> is
-an array reference holding the value passed to C<Games::Mastermind::play>
-and C<$result> is the value returned  by C<play>.
+This randomly guesses until it gets the right answer. It does not attempt to
+avoid guessing the same code twice.
 
-It is possible to pass an array reference as the move to make.
+=head2 L<Games::Mastermind::Solver::Sequential>
 
-=head2 remaining (optional)
+This guesses each code in order until it gets the right answer. It uses no
+information from the results to prepare its next guesses.
 
-    $number = $player->remaining;
+=head2 L<Games::Mastermind::Solver::Basic>
 
-The number of possible solutions given the knowledge the player has
-accumulated.
+This is the first usable algorithm. It will keep track of all the possible
+codes. When a result is known, it will go through the possible codes and
+eliminate any result inconsistent with the result. For example, C<BBBB> is not
+a possible result when C<WKYW> is guessed and receives a result of 1 black.
+This is because C<WKYW> would not score 1 black if the correct code is
+C<BBBB>.
 
-=head2 reset
+=head1 USAGE
 
-    $player->reset;
+=head2 C<new>
 
-Resets the internal state of the player.
+Creates a new L<Games::Mastermind::Solver::*> object. Note that you MUST
+instantiate a subclass of this module. C<new> takes a number of arguments:
 
-=head2 guess
+=head3 C<holes>
 
-    $guess = $player->guess;
+The number of holes. Default: 4.
 
-Guesses a solution (to be implemented in a subclass).
+=head3 C<pegs>
 
-=head2 check
+The representations of the pegs. Default: 'K', 'B', 'G', 'R', 'Y', 'W'.
 
-    $player->check( $guess, $result );
+=head3 C<get_result>
 
-Given a guess and the result for the guess, determines which positions
-are still possible solutions for the game (to be implemented in a subclass).
+A coderef to call any time the module wants user input. It passes the coderef
+C<$self> and the string of the guess (e.g. C<KRBK>) and expects to receive two
+numbers, C<black pegs> and C<white pegs>, as return value. I will call this
+method multiple times if necessary to get sane output, so you don't need to do
+much processing.
 
-=head2 AUTHOR
+The default queries the user through standard output and standard input.
 
-Mattia Barbon <mbarbon@cpan.org>
+=head2 C<solve>
 
-=head2 LICENSE
+The method to call to solve a particular game of Mastermind. This takes no
+arguments. It returns the solution as a string, or C<undef> if no solution
+could be found.
 
-This program is free software; you can redistribute it and/or modify
-it under the same terms as Perl itself.
+=head2 C<holes>
+
+This will return the number of holes used in the game.
+
+=head2 C<pegs>
+
+This will return an array reference of the pegs used in the game.
+
+=head2 C<history>
+
+This will return an array reference of the guesses made so far in the game.
+Each item in C<history> is an array refrence itself, containing the guess, its
+black pegs, and its white pegs.
+
+=head1 SUBCLASSING
+
+This module uses L<Moose> so please use it to extend this module. C<:)>
+
+Your solver should operate such that any update to its internal state is caused
+by C<result_of>, not C<make_guess>. This is because your C<result_of> method
+may be called (multiple times) before C<make_guess> is first called.
+
+If you absolutely have to entangle your guessing and result processing code,
+one way to make this work is to have C<result_of> do all the calculation and
+store the next guess to make in an attribute.
+
+=head2 REQUIRED METHODS
+
+=head3 make_guess
+
+This method will receive no arguments, and expects a string representing the
+guessed code as a result. If your C<make_guess> returns C<undef>, that will be
+interpreted as "unable to solve this code." If your C<make_guess> returns a
+scalar reference, that will be interpreted as the correct solution.
+
+=head2 OPTIONAL METHODS
+
+=head3 result_of
+
+This method will receive three arguments: the guess made, the number of black
+pegs, and the number of white pegs. It doesn't have to return anything.
+
+=head2 HELPER METHODS
+
+=head3 last_guess
+
+This returns the last code guessed, or C<undef> if no code has been guessed
+yet.
+
+=head3 random_peg
+
+This returns a peg randomly selected from valid pegs.
+
+=head3 all_codes
+
+This returns a hash reference of all possible codes. This is not cached in any
+way, so each call is a large speed penalty.
+
+=head3 score
+
+This expects two codes. It will return the black and white marker count as if
+the first is a guess against the second. (actually, this method is associative,
+so you could say the second against the first C<:)>).
+
+=head1 SEE ALSO
+
+L<Games::Mastermind>, L<http://sartak.katron.org/nh/mastermind>
+
+=head1 AUTHOR
+
+Shawn M Moore, C<< <sartak at gmail.com> >>
+
+=head1 BUGS
+
+No known bugs.
+
+Please report any bugs through RT: email
+C<bug-games-mastermind-solver at rt.cpan.org>, or browse
+L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Games-Mastermind-Solver>.
+
+=head1 SUPPORT
+
+You can find this documentation for this module with the perldoc command.
+
+    perldoc Games::Mastermind::Solver
+
+You can also look for information at:
+
+=over 4
+
+=item * AnnoCPAN: Annotated CPAN documentation
+
+L<http://annocpan.org/dist/Games-Mastermind-Solver>
+
+=item * CPAN Ratings
+
+L<http://cpanratings.perl.org/d/Games-Mastermind-Solver>
+
+=item * RT: CPAN's request tracker
+
+L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=Games-Mastermind-Solver>
+
+=item * Search CPAN
+
+L<http://search.cpan.org/dist/Games-Mastermind-Solver>
+
+=back
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2007 Shawn M Moore.
+
+This program is free software; you can redistribute it and/or modify it
+under the same terms as Perl itself.
+
+=cut
+
+1;
+
